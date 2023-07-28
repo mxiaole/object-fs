@@ -153,13 +153,13 @@ func main() {
 		return
 	}
 
-	http.HandleFunc("/", handleRequest)
+	http.HandleFunc("/ofs/put", handleRequest)
 	http.HandleFunc("/ofs/", handlerGet)
 
 	// 启动服务
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
-		fmt.Println("服务启动失败")
+		fmt.Println("服务启动失败", err)
 		return
 	}
 }
