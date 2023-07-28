@@ -2,12 +2,16 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 var DB *sql.DB
@@ -23,13 +27,21 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a := r.FormValue("bucket-name")
-	fmt.Println(a)
+	// string convert to int
+	bucketId, err := strconv.Atoi(r.FormValue("bucket-id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	// 获取上传的文件
 	file, handler, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	fmt.Println(handler.Filename, "文件名称")
+	name := handler.Filename
 
 	// 图片数据写入mysql
 	all, err := ioutil.ReadAll(file)
@@ -38,9 +50,12 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	md5 := CalculateMD5(all)
 	img := Image{
-		ObjId: 1,
-		Data:  all,
+		BucketId: bucketId,
+		Md5:      md5,
+		Name:     name,
+		Data:     all,
 	}
 
 	err = writeBinaryData(img)
@@ -48,25 +63,38 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("write to mysql error: ", err)
 	}
 
-	// 返回成功的响应
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Image uploaded successfully"))
+	response := Response{
+		Url: fmt.Sprintf("http://127.0.0.1:8080/ofs/%s/%s.jpg", r.FormValue("bucket-id"), md5),
+	}
+	resp, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(resp)
 }
 
 type Image struct {
-	ID    int
-	ObjId int
-	Data  []byte
+	Id       int
+	BucketId int
+	Name     string
+	Md5      string
+	Data     []byte
+}
+
+type Response struct {
+	Url string
 }
 
 func writeBinaryData(image Image) error {
-	stmt, err := DB.Prepare("INSERT INTO img (id, obj_id, data) VALUES (?, ?, ?)")
+	stmt, err := DB.Prepare("INSERT INTO img (bucket_id, name, data, md5) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(image.ID, image.ObjId, image.Data)
+	_, err = stmt.Exec(image.BucketId, image.Name, image.Data, image.Md5)
 	if err != nil {
 		return err
 	}
@@ -75,7 +103,9 @@ func writeBinaryData(image Image) error {
 }
 
 func createDBConnection() error {
-	db, err := sql.Open("mysql", "root:mengjiale@tcp(127.0.0.1:3306)/obs")
+	config := GetDBConfig()
+	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", config.UserName, config.Password,
+		config.Host, config.Port, config.Db))
 	if err != nil {
 		return err
 	}
@@ -83,32 +113,20 @@ func createDBConnection() error {
 	return err
 }
 
-func main() {
-
-	// 连接数据库
-	err := createDBConnection()
+func handlerGet(writer http.ResponseWriter, request *http.Request) {
+	img := Image{}
+	path := request.URL.Path
+	bucketId, _ := strconv.Atoi(strings.Split(path, "/")[2])
+	md5 := strings.Split(path, "/")[3]
+	fmt.Println(bucketId, strings.Split(md5, ".")[0])
+	err := DB.QueryRow("select data from img where bucket_id = ? and md5 = ?", bucketId, strings.Split(md5, ".")[0]).Scan(&img.Data)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	http.HandleFunc("/", handleRequest)
-	http.HandleFunc("/get", handlerGet)
-	// 启动服务
-	err = http.ListenAndServe(":8080", nil)
-	if err != nil {
-		fmt.Println("服务启动失败")
-		return
-	}
-}
-
-func handlerGet(writer http.ResponseWriter, request *http.Request) {
-	img := Image{}
-	id := request.URL.Query().Get("id")
-	DB.QueryRow("select * from img where id = ?", id).Scan(&img.ID, &img.ObjId, &img.Data)
-
 	// 将文件内容复制到目标文件
-	err := os.WriteFile("a.jpg", img.Data, 0644)
+	err = os.WriteFile("a.jpg", img.Data, 0644)
 	if err != nil {
 		log.Println("Error copying the file")
 		log.Println(err)
@@ -123,6 +141,25 @@ func handlerGet(writer http.ResponseWriter, request *http.Request) {
 	fmt.Println("写入数据", n)
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func main() {
+	// 连接数据库
+	err := createDBConnection()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	http.HandleFunc("/", handleRequest)
+	http.HandleFunc("/ofs/", handlerGet)
+
+	// 启动服务
+	err = http.ListenAndServe(":8080", nil)
+	if err != nil {
+		fmt.Println("服务启动失败")
 		return
 	}
 }
