@@ -21,10 +21,23 @@ const (
 
 var DB *sql.DB
 
+type Image struct {
+	Id       int
+	BucketId int
+	Name     string
+	Md5      string
+	Data     []byte
+}
+
+type Response struct {
+	Url string
+}
+
 // 图片上传服务
 // PUT方法上传图片t不同
 // 图床服务器
-func handleRequest(w http.ResponseWriter, r *http.Request) {
+
+func SaveFile(w http.ResponseWriter, r *http.Request) {
 	// 解析表单数据
 	err := r.ParseMultipartForm(10 << 20) // 限制上传文件的大小
 	if err != nil {
@@ -92,18 +105,6 @@ func getBucketId(w http.ResponseWriter, r *http.Request, err error) int {
 	return bucketId
 }
 
-type Image struct {
-	Id       int
-	BucketId int
-	Name     string
-	Md5      string
-	Data     []byte
-}
-
-type Response struct {
-	Url string
-}
-
 func writeBinaryData(image Image) error {
 	stmt, err := DB.Prepare("INSERT INTO img (bucket_id, name, data, md5) VALUES (?, ?, ?, ?)")
 	if err != nil {
@@ -119,7 +120,7 @@ func writeBinaryData(image Image) error {
 	return nil
 }
 
-func createDBConnection() error {
+func createConnection() error {
 	config := GetDBConfig()
 	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", config.UserName, config.Password,
 		config.Host, config.Port, config.Db))
@@ -130,13 +131,13 @@ func createDBConnection() error {
 	return err
 }
 
-func handlerGet(writer http.ResponseWriter, request *http.Request) {
+func GetPicByUrl(writer http.ResponseWriter, request *http.Request) {
 	img := Image{}
 	path := request.URL.Path
 	bucketId, _ := strconv.Atoi(strings.Split(path, "/")[2])
 	md5 := strings.Split(path, "/")[3]
 	fmt.Println(bucketId, strings.Split(md5, ".")[0])
-	err := DB.QueryRow("select data from img where bucket_id = ? and md5 = ?", bucketId, strings.Split(md5, ".")[0]).Scan(&img.Data)
+	err := DB.QueryRow(`select data from img where bucket_id = ? and md5 = ?`, bucketId, strings.Split(md5, ".")[0]).Scan(&img.Data)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -164,13 +165,13 @@ func handlerGet(writer http.ResponseWriter, request *http.Request) {
 
 func main() {
 	// 连接数据库
-	err := createDBConnection()
+	err := createConnection()
 	if err != nil {
 		panic(fmt.Sprintf("create db connection error: %v", err))
 	}
 
-	http.HandleFunc("/ofs/put", handleRequest)
-	http.HandleFunc("/ofs/", handlerGet)
+	http.HandleFunc("/ofs/put", SaveFile)
+	http.HandleFunc("/ofs/", GetPicByUrl)
 
 	// 启动服务
 	fmt.Println("服务启动......")
