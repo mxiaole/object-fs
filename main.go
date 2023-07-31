@@ -14,6 +14,11 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+const (
+	BUCKET_ID  = "bucket-id"
+	FORM_FIELD = "file"
+)
+
 var DB *sql.DB
 
 // 图片上传服务
@@ -27,15 +32,14 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// string convert to int
-	bucketId, err := strconv.Atoi(r.FormValue("bucket-id"))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	bucketId := getBucketId(w, r, err)
+	if bucketId == 0 {
+		fmt.Println("bucket-id is empty please check.")
 		return
 	}
 
 	// 获取上传的文件
-	file, handler, err := r.FormFile("file")
+	file, handler, err := r.FormFile(FORM_FIELD)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -64,7 +68,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := Response{
-		Url: fmt.Sprintf("http://127.0.0.1:8080/ofs/%s/%s.jpg", r.FormValue("bucket-id"), md5),
+		Url: fmt.Sprintf("http://127.0.0.1:8080/ofs/%s/%s.jpg", r.FormValue(BUCKET_ID), md5),
 	}
 	resp, err := json.Marshal(response)
 	if err != nil {
@@ -72,7 +76,20 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(resp)
+	_, err = w.Write(resp)
+	if err != nil {
+		return
+	}
+}
+
+func getBucketId(w http.ResponseWriter, r *http.Request, err error) int {
+	// string convert to int
+	bucketId, err := strconv.Atoi(r.FormValue(BUCKET_ID))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return 0
+	}
+	return bucketId
 }
 
 type Image struct {
@@ -149,14 +166,14 @@ func main() {
 	// 连接数据库
 	err := createDBConnection()
 	if err != nil {
-		fmt.Println(err)
-		return
+		panic(fmt.Sprintf("create db connection error: %v", err))
 	}
 
 	http.HandleFunc("/ofs/put", handleRequest)
 	http.HandleFunc("/ofs/", handlerGet)
 
 	// 启动服务
+	fmt.Println("服务启动......")
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		fmt.Println("服务启动失败", err)
