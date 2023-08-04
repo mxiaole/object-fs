@@ -153,7 +153,6 @@ func GetPicByUrl(writer http.ResponseWriter, request *http.Request) {
 	path := request.URL.Path
 	bucketId, _ := strconv.Atoi(strings.Split(path, "/")[2])
 	md5 := strings.Split(path, "/")[3]
-	fmt.Println(bucketId, strings.Split(md5, ".")[0])
 	err := DB.QueryRow(`select data from img where bucket_id = ? and md5 = ?`, bucketId, strings.Split(md5, ".")[0]).Scan(&img.Data)
 	if err != nil {
 		fmt.Println(err)
@@ -172,8 +171,7 @@ func GetPicByUrl(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Content-Type", "image/jpeg")
 
 	// 写入图片内容作为响应
-	n, err := writer.Write(img.Data)
-	fmt.Println("写入数据", n)
+	_, err = writer.Write(img.Data)
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		return
