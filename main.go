@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -156,14 +154,6 @@ func GetPicByUrl(writer http.ResponseWriter, request *http.Request) {
 	err := DB.QueryRow(`select data from img where bucket_id = ? and md5 = ?`, bucketId, strings.Split(md5, ".")[0]).Scan(&img.Data)
 	if err != nil {
 		fmt.Println(err)
-		return
-	}
-
-	// 将文件内容复制到目标文件
-	err = os.WriteFile("a.jpg", img.Data, 0644)
-	if err != nil {
-		log.Println("Error copying the file")
-		log.Println(err)
 		return
 	}
 
