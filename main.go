@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,8 +16,8 @@ import (
 )
 
 const (
-	BUCKET_ID  = "bucket-id"
-	FORM_FIELD = "file"
+	BucketId  = "bucket-id"
+	FormField = "file"
 )
 
 var DB *sql.DB
@@ -37,6 +38,22 @@ type Response struct {
 // PUT方法上传图片t不同
 // 图床服务器
 
+// 获取本机的IP
+func getLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
+}
+
 func SaveFile(w http.ResponseWriter, r *http.Request) {
 	// 解析表单数据
 	err := r.ParseMultipartForm(10 << 20) // 限制上传文件的大小
@@ -52,7 +69,7 @@ func SaveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 获取上传的文件
-	file, handler, err := r.FormFile(FORM_FIELD)
+	file, handler, err := r.FormFile(FormField)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -81,7 +98,7 @@ func SaveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := Response{
-		Url: fmt.Sprintf("http://127.0.0.1:8080/ofs/%s/%s.jpg", r.FormValue(BUCKET_ID), md5),
+		Url: fmt.Sprintf("http://%s/ofs/%s/%s.jpg", getLocalIP(), r.FormValue(BucketId), md5),
 	}
 	resp, err := json.Marshal(response)
 	if err != nil {
@@ -97,7 +114,7 @@ func SaveFile(w http.ResponseWriter, r *http.Request) {
 
 func getBucketId(w http.ResponseWriter, r *http.Request, err error) int {
 	// string convert to int
-	bucketId, err := strconv.Atoi(r.FormValue(BUCKET_ID))
+	bucketId, err := strconv.Atoi(r.FormValue(BucketId))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return 0
