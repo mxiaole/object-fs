@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -168,6 +173,47 @@ func GetPicByUrl(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
+// 实现配置文件变化的时候，服务进行重启
+func watchConfig(sigChan chan os.Signal) {
+	changed := make(chan bool, 1)
+	// 获取配置文件的元数据
+	fileInfo, err := os.Stat("config.toml")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("xxxxxxxxxxxxxx", fileInfo.ModTime())
+
+	modifyTime := fileInfo.ModTime()
+
+	go func() {
+		timer := time.NewTicker(10 * time.Second)
+
+		for {
+			f, err := os.Stat("config.toml")
+			if err != nil {
+				fmt.Println(err)
+			}
+			m := f.ModTime()
+			fmt.Println("aaaaaaaaaaaa", m.Sub(modifyTime).Seconds())
+			if m.Sub(modifyTime).Seconds() > 0 {
+				fmt.Println("文件被修改了。。。。。。。")
+				changed <- true
+				modifyTime = m
+				sigChan <- syscall.SIGHUP
+			}
+			select {
+			case <-changed:
+				fmt.Println("配置文件发生的变化")
+
+			case <-timer.C:
+				fmt.Println("定时器触发")
+			}
+		}
+
+	}()
+}
+
 func main() {
 	// 连接数据库
 	err := createConnection()
@@ -178,11 +224,33 @@ func main() {
 	http.HandleFunc("/ofs/put", SaveFile)
 	http.HandleFunc("/ofs/", GetPicByUrl)
 
+	sigalChan := make(chan os.Signal)
+	signal.Notify(sigalChan, syscall.SIGHUP)
+
+	watchConfig(sigalChan)
+
 	// 启动服务
-	fmt.Println("服务启动......")
-	err = http.ListenAndServe(":8080", nil)
-	if err != nil {
-		fmt.Println("服务启动失败", err)
-		return
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: nil,
 	}
+
+	for {
+		go server.ListenAndServe()
+		<-sigalChan
+
+		fmt.Println("signal received, shutting down server...")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err = server.Shutdown(ctx)
+
+		if err != nil {
+			fmt.Println("服务关闭失败", err)
+			return
+		} else {
+			fmt.Println("服务开始重启。。。。。。。")
+		}
+	}
+
 }
